@@ -1,0 +1,776 @@
+;Zachery Takkesh
+;Full UART Assembly Code
+;CECS 460 Fall 2019
+
+;===================================================
+;	     ASCII & Constant DECLARATIONS
+;===================================================
+ascii_null     EQU   0000
+ascii_BS       EQU   0008  ; backspace
+ascii_LF       EQU   000A  ; <LF> 
+ascii_CR       EQU   000D  ; <CR> 
+ascii_aster    EQU   002A  ; *
+ascii_AT       EQU   0040  ; @
+ascii_DOT      EQU   002E  ; .
+ascii_EQ       EQU   003D  ; = 
+ascii_DASH     EQU   002D  ; - dash
+ascii_COL      EQU   003A  ; colon
+ascii_SP       EQU   0020  ; space
+
+ascii_0        EQU   0030
+ascii_1        EQU   0031
+ascii_2        EQU   0032
+ascii_3        EQU   0033
+ascii_4        EQU   0034
+ascii_5        EQU   0035
+ascii_6        EQU   0036
+ascii_7        EQU   0037
+ascii_8        EQU   0038
+ascii_9        EQU   0039
+ascii_A        EQU   0041
+ascii_B        EQU   0042
+ascii_C        EQU   0043
+ascii_D        EQU   0044
+ascii_E        EQU   0045
+ascii_F        EQU   0046
+ascii_G        EQU   0047
+ascii_H        EQU   0048
+ascii_I        EQU   0049
+ascii_J        EQU   004A
+ascii_K        EQU   004B
+ascii_L        EQU   004C
+ascii_M        EQU   004D
+ascii_N        EQU   004E
+ascii_O        EQU   004F
+ascii_P        EQU   0050
+ascii_Q        EQU   0051
+ascii_R        EQU   0052
+ascii_S        EQU   0053
+ascii_T        EQU   0054
+ascii_U        EQU   0055
+ascii_V        EQU   0056
+ascii_W        EQU   0057
+ascii_X        EQU   0058
+ascii_Y        EQU   0059
+ascii_Z        EQU   005A
+
+FORTY		   EQU   0028 
+ZERO		   EQU   0000
+ONE		   	   EQU   0001
+
+;===================================================
+;	     ADDRESSES FOR OUTPUTS
+;===================================================
+BAN_START    	EQU     0000
+BAN_END      	EQU     0098
+
+PROMPT_START    EQU     0098
+PROMPT_END      EQU     00A4
+
+HOMETW_START  	EQU     00A4
+HOMETW_END    	EQU     00BD
+
+BACKSPCE_START  EQU     00BD
+BACKSPCE_END    EQU     00C0
+
+CRLF_START      EQU     00C0
+CRLF_END        EQU     00C2
+
+;===================================================
+;	     REGISTER DECLARATIONS
+;===================================================
+CHAR_REG        EQU     R0      ; holds temporary ascii characters
+STATUS          EQU     R1      ; holds status signals
+DATA            EQU     R2      ; holds received data
+POINTER         EQU     R3      ; holds memory address
+LED_COUNT       EQU     R4      ; holds LED delay 
+DELAY_COUNT		EQU		R5      ; holds delay value
+LEDS			EQU     R6      ; holds LED value
+CONFIG			EQU     R8
+CASE            EQU     RC      ; holds current case based on user's input 
+CHAR_COUNT      EQU     RD      ; holds number of inputted characters
+
+;===================================================
+;	     INITIALIZATIONS
+;===================================================
+START
+        LOAD    CHAR_REG,       ZERO       
+        LOAD    CHAR_COUNT,     ZERO
+        LOAD    STATUS,         ZERO
+        LOAD    DATA,           ZERO
+        LOAD    CASE,           ONE    
+        LOAD 	CONFIG, 		ZERO
+        
+        LOAD 	LED_COUNT,      ZERO
+        LOAD    LEDS,           ONE
+		LOAD	DELAY_COUNT,    ZERO
+        
+        CALL    banner_init   
+        CALL    prompt_init   
+        CALL    hometown_init
+        CALL    bs_init 
+        CALL    crlf_init
+        
+        LOAD    POINTER,    	0000
+        ENINT  
+        
+        
+;===================================================
+;	     MAIN LOOP TO WALK ONBOARD LEDS
+;===================================================	
+MAIN
+	INPUT CONFIG, 0002
+	OUTPUT CONFIG, 0006
+	ADD LED_COUNT, ONE
+	ADDC DELAY_COUNT, ZERO
+	COMP DELAY_COUNT, 000F	;delay register compare value
+	JUMPC LED_OUT
+
+	LOAD LED_COUNT, ZERO
+	LOAD DELAY_COUNT, ZERO
+	RL LEDS 				;rotate LEDs 
+	
+LED_OUT
+	OUTPUT LEDS, 0002		;output LEDS 
+	JUMP MAIN
+	 
+;===================================================
+;	    	INTERRUPT SERVICE ROUTINE 
+;===================================================
+        ADDRESS 0300
+ISR     
+        INPUT   STATUS, 0001
+        AND     STATUS, 0003
+        
+        COMP    STATUS, 0003
+        JUMPZ   GOT_BOTH 
+        
+        COMP    STATUS, 0002        ; check if TxRdy is high 
+        CALLZ   GOT_TXRDY
+        
+        COMP    STATUS, 0001        ; check if RxRdy is high 
+        CALLZ   GOT_RXRDY
+		
+        RETEN 
+
+GOT_BOTH 
+        CALL GOT_TXRDY
+        CALL GOT_RXRDY
+        RETEN  
+
+;===================================================
+;	     	BIN_TO_ASCII SUBROUTINE
+;===================================================
+BINARY_TO_ASCII
+        LOAD    RE, CHAR_COUNT    
+       
+        
+        LOAD    RD, 000A      
+        CALL    FIND_IT         
+        ADD     RB, 0030       ;CONVERT TO ASCII
+        STORE   RB, 00C2       ;STORE TO MEMORY
+		
+        ADD     RE, 0030       ;CONVERT TO ASCII
+        STORE   RE, 00C3       ;STORE TO MEMORY  
+       
+
+        RETURN                 ;DONE
+           
+;===================================================
+;	    		 FIND_IT SUBROUTINE
+;===================================================      
+FIND_IT
+        LOAD    RB, ZERO
+NOT_DONE
+        SUB     RE, RD 
+        JUMPC   RESTORE
+        ADD     RB, ONE
+        JUMP    NOT_DONE
+
+RESTORE
+        ADD     RE, RD 
+        RETURN 
+		
+;===================================================
+;	    		 BANNER_INIT SUBROUTINE
+;===================================================
+banner_init
+        LOAD    CHAR_REG, ascii_DASH
+x50     STORE   CHAR_REG,       POINTER
+        ADD     POINTER,    ONE   
+        ADD     CHAR_COUNT, ONE    
+        COMP    CHAR_COUNT, 0031    ; 50 dashes
+        JUMPC   x50
+        LOAD    CHAR_COUNT, ZERO
+		
+        COMP    POINTER,    005F   
+        JUMPNC  finish_banner
+        
+        LOAD    CHAR_REG, ascii_CR     
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, ONE
+        
+        LOAD    CHAR_REG, ascii_LF
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, ONE
+        
+        ; 5 spaces
+        LOAD    CHAR_REG, ascii_DOT     
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, ONE
+        
+        LOAD    CHAR_REG, ascii_SP      
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, ONE
+        
+        LOAD    CHAR_REG, ascii_SP      
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, ONE        
+      
+        LOAD    CHAR_REG, ascii_SP     
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, ONE
+
+        LOAD    CHAR_REG, ascii_SP     
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, ONE
+    
+        LOAD    CHAR_REG, ascii_Z      
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, ONE
+        
+        LOAD    CHAR_REG, ascii_A      
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, 0001       
+        
+        LOAD    CHAR_REG, ascii_C      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, ONE        
+
+        LOAD    CHAR_REG, ascii_H      
+        STORE   CHAR_REG, POINTER        
+        ADD     POINTER, ONE
+
+        LOAD    CHAR_REG, ascii_SP     
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+		
+		LOAD    CHAR_REG, ascii_T      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, ONE
+		
+		LOAD    CHAR_REG, ascii_A      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, ONE
+		
+		LOAD    CHAR_REG, ascii_K      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, ONE
+		
+		LOAD    CHAR_REG, ascii_K      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, ONE
+		
+		LOAD    CHAR_REG, ascii_E      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, ONE
+		
+		LOAD    CHAR_REG, ascii_S      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, ONE
+		
+		LOAD    CHAR_REG, ascii_H      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, ONE
+
+        LOAD    CHAR_REG, ascii_CR     
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_LF
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, 0001      
+; END OF NAME 
+        ; 5 spaces
+        LOAD    CHAR_REG, ascii_DOT     
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_SP    
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_SP     
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001        
+      
+        LOAD    CHAR_REG, ascii_SP     
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_SP    
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001        
+        
+        LOAD    CHAR_REG, ascii_C      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_E      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001       
+
+        LOAD    CHAR_REG, ascii_C      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_S      
+        STORE   CHAR_REG, POINTER     
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_SP     
+        STORE   CHAR_REG, POINTER     
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_4     
+        STORE   CHAR_REG, POINTER    
+        ADD     POINTER, 0001     
+        
+        LOAD    CHAR_REG, ascii_6      
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, 0001      
+
+        LOAD    CHAR_REG, ascii_0      
+        STORE   CHAR_REG, POINTER   
+        ADD     POINTER, 0001      
+       
+        LOAD    CHAR_REG, ascii_CR     
+        STORE   CHAR_REG, POINTER    
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_LF     
+        STORE   CHAR_REG, POINTER     
+        ADD     POINTER, 0001      
+        
+        LOAD    CHAR_REG, ascii_DOT     
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_SP     
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_SP     
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, 0001        
+      
+        LOAD    CHAR_REG, ascii_SP     
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_SP     
+        STORE   CHAR_REG, POINTER     
+        ADD     POINTER, 0001  
+        
+        LOAD    CHAR_REG, ascii_F      
+        STORE   CHAR_REG, POINTER    
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_U      
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_L      
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, 0001        
+      
+        LOAD    CHAR_REG, ascii_L      
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_SP     
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001   
+
+        LOAD    CHAR_REG, ascii_U     
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_A      
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, 0001        
+      
+        LOAD    CHAR_REG, ascii_R      
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_T     
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001          
+
+        LOAD    CHAR_REG, ascii_CR     
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_LF     
+        STORE   CHAR_REG, POINTER      
+        ADD     POINTER, 0001      
+		
+        LOAD    CHAR_REG, ascii_DASH    
+        JUMP    x50
+finish_banner						
+        
+		
+        LOAD    CHAR_REG, ascii_CR      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, ONE
+        LOAD    CHAR_REG, ascii_LF     
+        STORE   CHAR_REG, POINTER
+        ADD     POINTER, ONE
+        
+        LOAD    CHAR_COUNT, 0000
+        
+        RETURN 
+         
+;===================================================
+;	    		 PROMPT_INIT SUBROUTINE
+;===================================================
+prompt_init 
+        
+        LOAD    CHAR_REG, ascii_E       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001   
+
+        LOAD    CHAR_REG, ascii_N       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_T       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001        
+      
+        LOAD    CHAR_REG, ascii_E       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_R       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001          
+
+        LOAD    CHAR_REG, ascii_SP     
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_A       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001  
+        
+        LOAD    CHAR_REG, ascii_SP      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_K       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001        
+      
+        LOAD    CHAR_REG, ascii_E       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_Y       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_COL    
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        RETURN 
+;===================================================
+;	         HOMETOWN_INIT SUBROUTINE
+;===================================================
+hometown_init 
+        
+        LOAD    CHAR_REG, ascii_M       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001        
+      
+        LOAD    CHAR_REG, ascii_Y       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_SP      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001          
+
+        LOAD    CHAR_REG, ascii_H       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_O       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001  
+        
+        LOAD    CHAR_REG, ascii_M      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_E       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001        
+      
+        LOAD    CHAR_REG, ascii_T       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_O       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_W       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_N       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_SP     
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001  
+        
+        LOAD    CHAR_REG, ascii_I       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_S      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001        
+      
+        LOAD    CHAR_REG, ascii_SP      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_M       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_A       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_R      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_Y       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_L       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_A       
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_N      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+		
+		LOAD    CHAR_REG, ascii_D      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_CR      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_LF      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        RETURN 
+;===================================================
+;	    		 BACKSPACE_INIT SUBROUTINE
+;===================================================
+bs_init
+        
+        LOAD    CHAR_REG, ascii_BS      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+
+        LOAD    CHAR_REG, ascii_SP      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_BS      
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        RETURN
+;===================================================
+;	    		 NEWLINE_INIT SUBROUTINE
+;===================================================
+crlf_init
+        
+        LOAD    CHAR_REG, ascii_CR     
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        LOAD    CHAR_REG, ascii_LF     
+        STORE   CHAR_REG, POINTER       
+        ADD     POINTER, 0001
+        
+        RETURN
+        
+;===================================================
+;	    		 TxRdy SUBROUTINE
+; Retrieves data from memory based on current case
+;===================================================    
+GOT_TXRDY 
+        COMP    CASE,    ZERO           ; case 0
+        RETURNZ
+        
+        FETCH   CHAR_REG, POINTER       ; fetch data from pointer
+        OUTPUT  CHAR_REG, ZERO          ; output the data
+        ADD     POINTER,  ONE           
+        
+        COMP    CASE,    0001           ; case 1 
+        JUMPZ   PRINT_BANNER            ; prints banner
+        
+        COMP    CASE,    0002           ; case 2 
+        JUMPZ   PRINT_PROMPT            ; prints prompt 
+        
+        COMP    CASE,    0003           ; case 3
+        JUMPZ   PRINT_HOMETOWN          ; prints hometown 
+        
+        COMP    CASE,    0004           ; case 4 
+        JUMPZ   PRINT_BS                ; prints backspace 
+        
+        COMP    CASE,    0005           ; case 5 
+        JUMPZ   PRINT_CRLF              ; prints new line
+        
+        COMP    CASE,    0006           ; case 6 
+        JUMPZ   PRINT_COUNT				; prints character count 
+        
+        RETURN 
+
+PRINT_BS
+        COMP    POINTER, BACKSPCE_END
+        RETURNC
+        LOAD    CASE, ZERO
+        RETURN 
+      
+PRINT_BANNER
+        COMP        POINTER, BAN_END
+        RETURNC
+        LOAD        CASE, 0002       
+        RETURN 
+        
+PRINT_PROMPT      
+        COMP        POINTER, PROMPT_END
+        RETURNC 
+        LOAD        CASE, 0000
+        RETURN 
+        
+PRINT_HOMETOWN
+    
+        COMP        POINTER, HOMETW_END
+        RETURNC
+        LOAD        POINTER, PROMPT_START
+        LOAD        CASE, 0002
+        RETURN 
+        
+PRINT_CRLF   
+        COMP        POINTER, CRLF_END
+        RETURNC
+        LOAD        POINTER, PROMPT_START
+        LOAD        CASE, 0002  
+        RETURN 
+        
+PRINT_COUNT      
+        COMP    POINTER, 00C4
+        RETURNC 
+        LOAD    POINTER, CRLF_START
+        LOAD    CASE, 0005 
+        RETURN 
+        
+;===================================================
+;	    		 RxRdy SUBROUTINE
+;     Sets case and pointer based on user input 
+;===================================================
+GOT_RXRDY 
+        COMP        CASE, ZERO      ; z if it is true
+        RETURNNZ                   
+		; only enter this subroutine if the user is inputting chars
+		; based on those characters, different cases are set
+		
+        INPUT       DATA, ZERO
+        COMP        DATA, ZERO 
+        RETURNZ
+
+        COMP        DATA, ascii_aster
+        JUMPZ       SET_HOMETOWN 
+        
+        COMP        DATA, ascii_BS
+        JUMPZ       SET_BS
+        
+        COMP        DATA, ascii_CR
+        JUMPZ       SET_CRLF
+        
+        COMP        DATA, ascii_AT
+        JUMPZ       SET_AT
+        
+        ; Only allowing forty characters 
+        ADD         CHAR_COUNT, ONE
+        OUTPUT      DATA,       ZERO
+        COMP        CHAR_COUNT, FORTY
+        JUMPZ       SET_CRLF 
+        RETURN 
+        
+
+SET_HOMETOWN
+        LOAD        CASE, 0003
+        LOAD        POINTER, HOMETW_START
+        LOAD        CHAR_REG, ascii_null
+        OUTPUT      CHAR_REG, ZERO
+        LOAD        CHAR_COUNT, ZERO
+        RETURN 
+        
+SET_BS
+        COMP        CHAR_COUNT, ZERO
+        RETURNZ
+        LOAD        CASE, 0004
+        LOAD        POINTER, BACKSPCE_START
+        LOAD        CHAR_REG, ascii_null
+        OUTPUT      CHAR_REG, ZERO
+        SUB         CHAR_COUNT, ONE
+        RETURN 
+   
+SET_CRLF
+        
+        LOAD        CASE, 0005 
+        LOAD        POINTER, CRLF_START
+        LOAD        CHAR_REG, ascii_null
+        OUTPUT      CHAR_REG, ZERO
+        LOAD        CHAR_COUNT, ZERO
+        RETURN  
+        
+SET_AT
+        CALL        BINARY_TO_ASCII
+        LOAD        CASE, 0006
+        LOAD        POINTER, 00C2
+        LOAD        CHAR_REG, ascii_null 
+        OUTPUT      CHAR_REG, ZERO
+        LOAD        CHAR_COUNT, ZERO
+        RETURN
+ 
+;===================================================
+; INTERRUPT SERVICE ROUTINE VECTORED THRU 0FFE
+;===================================================
+        
+        ADDRESS 0FFE 
+        JUMP    ISR 
+        END 

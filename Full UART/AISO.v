@@ -1,0 +1,43 @@
+`timescale 1ns / 1ps
+////////////////////////////////////////////////////////////////////////////////////
+// This document contains information proprietary to the CSULB student that created
+// the file - any reuse without adequate approval and documentation is prohibited   
+//
+// File Name: AISO.v
+// Project: Proj 3
+// Created by <Zachery Takkesh> on <November 16th, 2019>
+// Copyright @ 2019 <Zachery Takkesh>. All rights reserved
+//
+// Purpose: This is an Asynchronous In Synchronous Out module. The purpose of 
+// 			this module is to synchronize the release of reset. Once the reset button
+// 			is released, reset is turned off synchronously. 
+//
+// In submitting this file for class work at CSULB
+// I am confirming that this is my work and the work of no one else. 
+// 
+// In submitting this code I acknowledge that plagiarism in student project
+// work is subject to dismissal from the class. 
+////////////////////////////////////////////////////////////////////////////////
+module AISO ( clk , reset , reset_sync ) ;
+	// Input declarations
+	input      clk       , reset;
+	
+	// Output declaration
+	output   wire  reset_sync;
+	
+	// Wire declarations to interconnect
+	reg Q1 , Q2 ;
+	
+	// Sequential block to instantiate two d-flops 
+	// When Reset goes to 1, Q goes to 0, and 
+	// get inverted to output a 1
+	always @ (posedge clk, posedge reset)
+		if (reset)
+			{Q1, Q2} <= 2'b0;
+		else
+			{Q1, Q2} <= {1'b1, Q1};
+	
+	// Assign statement to invert the output to be a 1
+	assign reset_sync = ~Q2;
+
+endmodule //end of AISO
